@@ -1,0 +1,26 @@
+[package]
+name = "cargo_value_scanner"
+version = "0.0.2"
+authors = ["berggruen"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dioxus = { version = "0.7.0", features = ["router"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "time"] }
+time = { version = "0.3", features = ["parsing", "formatting"] }
+url = "2.5"
+uuid = { version = "1.10", features = ["v4"] }
+directories = "5.0"
+rust-embed = "8.9.0"
+
+[features]
+default = ["desktop"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]

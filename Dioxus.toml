@@ -1,0 +1,25 @@
+[application]
+name = "Cargo Value Scanner"
+default_platform = "desktop"
+
+[web.app]
+title = "Cargo Value Scanner"
+
+[web.resource]
+style = []
+script = []
+
+[web.resource.dev]
+script = []
+
+[bundle]
+identifier = "com.setscallywag.cargovaluescanner"
+publisher = "SetScallywag"
+copyright = "Copyright © SetScallywag"
+resources = [
+  "assets/**/*",
+  "tailwind.css"
+]
+
+[bundle.desktop]
+icon = ["assets/favicon.ico"]

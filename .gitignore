@@ -11,8 +11,5 @@ Thumbs.db
 tailwind.css.tmp
 .Dioxus/*
 
-# Cargo metadata
-Cargo.lock
-
 # Logs
 *.log
