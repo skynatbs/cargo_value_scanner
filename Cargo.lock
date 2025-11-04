@@ -298,12 +298,14 @@ dependencies = [
 
 [[package]]
 name = "cargo_value_scanner"
-version = "0.0.2"
+version = "0.0.6"
 dependencies = [
  "dioxus",
+ "dioxus-desktop",
  "directories",
  "reqwest",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

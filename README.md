@@ -72,4 +72,11 @@ Use this tab to adjust cache TTLs (how long commodity/price data stays “fresh�
 
 ---
 
+## 6. Updates
+
+- Open the **Settings** tab to see the installed version and trigger a GitHub release check.
+- Tap **Check for updates** to compare your build with the latest tag, then use **Update** to jump straight to the repository.
+
+---
+
 Enjoy planning profitable runs! If you encounter issues (missing data, API failures, etc.) the toast log will provide guidance on what went wrong. Upcoming builds may include additional analytics—keep an eye on release notes for new features.  

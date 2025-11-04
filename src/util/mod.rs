@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub mod assets;
 pub mod persistence;
+pub mod version;
 
 static ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 

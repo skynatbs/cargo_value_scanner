@@ -7,7 +7,10 @@ use crate::{
         components::toast::{push_toast, ToastKind, ToastMessage},
         pages::cargo::request_price_fetch,
     },
-    util::assets,
+    util::{
+        assets,
+        version::{self, APP_AUTHOR, APP_NAME, APP_REPO_URL},
+    },
 };
 
 #[component]
@@ -82,6 +85,38 @@ pub fn SettingsPage() -> Element {
         }
     };
 
+    let update_state = use_signal(UpdateState::default);
+
+    let on_check_updates = {
+        let mut state = update_state.clone();
+        move |_| {
+            if matches!(state(), UpdateState::Checking) {
+                return;
+            }
+            state.set(UpdateState::Checking);
+            let mut state_for_task = state.clone();
+            spawn(async move {
+                let next_state = match version::check_for_update().await {
+                    Ok(info) => {
+                        if info.update_available() {
+                            let latest = info
+                                .latest_display()
+                                .map(ToString::to_string)
+                                .unwrap_or_else(|| format!("v{}", info.current));
+                            UpdateState::UpdateAvailable { latest_tag: latest }
+                        } else {
+                            UpdateState::UpToDate {
+                                latest_tag: info.latest_display().map(ToString::to_string),
+                            }
+                        }
+                    }
+                    Err(err) => UpdateState::Failed(err.to_string()),
+                };
+                state_for_task.set(next_state);
+            });
+        }
+    };
+
     let on_clear_cache = {
         let mut state = state.clone();
         let toasts = toasts.clone();
@@ -118,6 +153,10 @@ pub fn SettingsPage() -> Element {
             }
         }
     };
+
+    let update_snapshot = update_state();
+    let disable_update_button = matches!(&update_snapshot, UpdateState::Checking);
+    let current_version_label = version::version_label();
 
     rsx! {
         div { class: "space-y-8",
@@ -193,6 +232,38 @@ pub fn SettingsPage() -> Element {
             }
 
             section {
+                class: "rounded-xl border border-slate-800 bg-slate-900/40 p-6",
+                div { class: "flex flex-wrap items-center justify-between gap-3",
+                    div {
+                        h2 { class: "text-sm font-semibold uppercase tracking-wide text-slate-500", "{APP_NAME}" }
+                        p { class: "text-xs uppercase tracking-wide text-slate-500", "Built by {APP_AUTHOR}" }
+                    }
+                    span {
+                        class: "rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-semibold text-slate-200",
+                        "{current_version_label}"
+                    }
+                }
+                div { class: "mt-4",
+                    {render_update_status(&update_snapshot)}
+                }
+                div { class: "mt-4 flex flex-wrap gap-3",
+                    button {
+                        class: "rounded-lg border border-emerald-500/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-emerald-200 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60",
+                        onclick: on_check_updates,
+                        disabled: disable_update_button,
+                        "Check for updates"
+                    }
+                    a {
+                        href: APP_REPO_URL,
+                        target: "_blank",
+                        rel: "noreferrer",
+                        class: "rounded-lg border border-indigo-500/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-indigo-200 hover:bg-indigo-500/10",
+                        "Update"
+                    }
+                }
+            }
+
+            section {
                 class: "flex flex-col items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/40 p-6 text-center text-slate-400",
                 h2 { class: "text-sm font-semibold uppercase tracking-wide text-slate-500", "Data Attribution" }
                 a {
@@ -258,5 +329,53 @@ fn cache_label(resource: &CacheResource) -> String {
         CacheResource::Commodities => "Commodities".to_string(),
         CacheResource::SellLocations => "Locations".to_string(),
         CacheResource::Prices(id) => format!("Prices ({id})"),
+    }
+}
+
+#[derive(Clone)]
+enum UpdateState {
+    Idle,
+    Checking,
+    UpToDate { latest_tag: Option<String> },
+    UpdateAvailable { latest_tag: String },
+    Failed(String),
+}
+
+impl Default for UpdateState {
+    fn default() -> Self {
+        UpdateState::Idle
+    }
+}
+
+fn render_update_status(state: &UpdateState) -> Element {
+    match state {
+        UpdateState::Idle => rsx! {
+            p { class: "text-sm text-slate-400", "Press \"Check for updates\" to compare your build against the latest release tag on GitHub." }
+        },
+        UpdateState::Checking => rsx! {
+            p { class: "text-sm text-indigo-200", "Checking for updates…" }
+        },
+        UpdateState::UpToDate { latest_tag } => {
+            let label = latest_tag
+                .clone()
+                .unwrap_or_else(|| version::version_label());
+            rsx! {
+                span {
+                    class: "inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200",
+                    "Up to date"
+                    span { class: "font-normal text-emerald-300", "{label}" }
+                }
+            }
+        }
+        UpdateState::UpdateAvailable { latest_tag } => rsx! {
+            span {
+                class: "inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200",
+                "Update available"
+                span { class: "font-normal text-amber-300", "{latest_tag}" }
+            }
+        },
+        UpdateState::Failed(message) => rsx! {
+            p { class: "text-sm text-rose-300", "Update check failed: {message}" }
+        },
     }
 }
