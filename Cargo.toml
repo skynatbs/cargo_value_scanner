@@ -1,6 +1,6 @@
 [package]
 name = "cargo_value_scanner"
-version = "0.0.6"
+version = "1.0.0"
 authors = ["SetScallywag"]
 edition = "2021"
 description = "Desktop companion app for Star Citizen traders to evaluate cargo routes."
