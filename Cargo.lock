@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "cargo_value_scanner"
-version = "0.0.6"
+version = "1.0.0"
 dependencies = [
  "dioxus",
  "dioxus-desktop",

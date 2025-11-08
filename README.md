@@ -74,7 +74,7 @@ Use this tab to adjust cache TTLs (how long commodity/price data stays â€œfreshâ
 
 ## 6. Updates
 
-- Open the **Settings** tab to see the installed version and trigger a GitHub release check.
+- Open the **Settings** tab to see the installed version (derived from the current Git tag when available) and trigger a GitHub release check.
 - Tap **Check for updates** to compare your build with the latest tag, then use **Update** to jump straight to the repository.
 
 ---
