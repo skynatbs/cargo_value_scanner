@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::{
     app::persist_user_state,
-    domain::{AppState, CacheResource, ProfitabilityParams},
+    domain::{AppState, CacheResource, Profile, ProfitabilityParams},
     ui::{
         components::toast::{push_toast, ToastKind, ToastMessage},
         pages::cargo::request_price_fetch,
@@ -158,8 +158,38 @@ pub fn SettingsPage() -> Element {
     let disable_update_button = matches!(&update_snapshot, UpdateState::Checking);
     let current_version_label = version::version_label();
 
+    let current_profile = state.with(|s| s.profile);
+    
+    let on_change_profile = {
+        let mut state = state.clone();
+        move |_| {
+            state.with_mut(|s| s.profile = Profile::None);
+            persist_user_state(&state);
+        }
+    };
+    
     rsx! {
         div { class: "space-y-8",
+            // Profile section
+            section {
+                class: "rounded-xl border border-slate-800 bg-slate-900/40 p-6",
+                h2 { class: "text-sm font-semibold uppercase tracking-wide text-slate-500", "Profil" }
+                div { class: "mt-4 flex items-center justify-between",
+                    div { class: "flex items-center gap-3",
+                        span { class: "text-3xl", "{current_profile.emoji()}" }
+                        div {
+                            p { class: "font-semibold text-slate-100", "{current_profile.name()}" }
+                            p { class: "text-xs text-slate-500", "Aktives Spielerprofil" }
+                        }
+                    }
+                    button {
+                        class: "rounded-lg border border-slate-600 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-200 hover:bg-slate-800",
+                        onclick: on_change_profile,
+                        "Profil wechseln"
+                    }
+                }
+            }
+            
             section {
                 class: "rounded-xl border border-slate-800 bg-slate-900/40 p-6",
                 h2 { class: "text-sm font-semibold uppercase tracking-wide text-slate-500", "Profitability Parameters" }

@@ -15,4 +15,126 @@ a:hover {
     text-decoration: underline;
 }
 
+/* ============================================
+   MANUFACTURER THEMES
+   ============================================ */
 
+/* --- DRAKE INTERPLANETARY (Pirate) ---
+   Industrial, grimy, amber warning colors
+   CRT monitor aesthetic with scanlines and flicker
+   
+   Drake Color Palette:
+   --drake-bg: #3b1712       (dark brown-red background)
+   --drake-text: #d4523a     (mid orange-red text/labels)
+   --drake-accent: #ff9900   (bright orange highlights)
+*/
+
+:root {
+    --drake-bg: #3b1712;
+    --drake-bg-light: #4a1f18;
+    --drake-text: #d4523a;
+    --drake-text-dim: #a3402e;
+    --drake-accent: #ff9900;
+    --drake-accent-dim: #cc7a00;
+    --drake-border: #5c2a1f;
+    --drake-border-light: #7a3d2d;
+}
+
+/* CRT Scanline overlay for Drake */
+.drake-crt {
+    position: relative;
+    overflow: hidden;
+}
+
+.drake-crt::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.15) 0px,
+        rgba(0, 0, 0, 0.15) 1px,
+        transparent 1px,
+        transparent 2px
+    );
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* CRT Flicker animation */
+@keyframes crt-flicker {
+    0%, 100% { opacity: 1; }
+    92% { opacity: 1; }
+    93% { opacity: 0.8; }
+    94% { opacity: 1; }
+    97% { opacity: 0.9; }
+    98% { opacity: 1; }
+}
+
+.drake-flicker {
+    animation: crt-flicker 4s infinite;
+}
+
+/* Subtle screen glow for Drake active buttons */
+.drake-glow {
+    box-shadow: 
+        0 0 5px rgba(255, 153, 0, 0.4),
+        0 0 10px rgba(255, 153, 0, 0.2),
+        inset 0 0 15px rgba(212, 82, 58, 0.15);
+}
+
+/* Drake warning stripe pattern (for special elements) */
+.drake-hazard {
+    background: repeating-linear-gradient(
+        -45deg,
+        #1a1a1a,
+        #1a1a1a 10px,
+        #2a2a2a 10px,
+        #2a2a2a 20px
+    );
+}
+
+/* --- MISC (Trader) ---
+   Clean industrial, blue/white, Hull-C corporate
+   Professional, reliable hauler aesthetic
+*/
+
+.misc-glow {
+    box-shadow: 
+        0 0 10px rgba(56, 189, 248, 0.25),
+        0 0 20px rgba(56, 189, 248, 0.1);
+}
+
+/* Subtle gradient for MISC buttons */
+.misc-gradient {
+    background: linear-gradient(
+        180deg,
+        rgba(56, 189, 248, 0.25) 0%,
+        rgba(56, 189, 248, 0.15) 100%
+    );
+}
+
+/* --- ARGO ASTRONAUTICS (Miner) ---
+   Heavy industrial, orange/black, hazard utility
+   No-nonsense work equipment aesthetic
+*/
+
+.argo-glow {
+    box-shadow: 
+        0 0 6px rgba(249, 115, 22, 0.4),
+        0 0 12px rgba(249, 115, 22, 0.2);
+}
+
+/* Argo caution stripes */
+.argo-hazard-border {
+    border-image: repeating-linear-gradient(
+        -45deg,
+        #f97316,
+        #f97316 5px,
+        #1a1a1a 5px,
+        #1a1a1a 10px
+    ) 4;
+}

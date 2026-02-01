@@ -2,6 +2,9 @@ use std::cmp::Ordering;
 
 use dioxus::prelude::*;
 
+use crate::domain::Profile;
+use crate::ui::theme;
+
 #[derive(Clone, PartialEq)]
 pub struct PriceRow {
     pub location: String,
@@ -14,10 +17,12 @@ pub struct PriceRow {
     pub status_buy: Option<i32>,
     pub container_sizes: Vec<f64>,
     pub updated_label: String,
+    /// Terminal accepts stolen/illegal cargo (no questions asked).
+    pub is_nqa: bool,
 }
 
 #[component]
-pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
+pub fn PriceTable(rows: Vec<PriceRow>, profile: Profile) -> Element {
     let sort_mode = use_signal(|| SortMode::SellRange);
     let count = rows.len();
     let is_empty = rows.is_empty();
@@ -74,39 +79,41 @@ pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
 
     rsx! {
         div {
-            class: "rounded-xl border border-slate-800 bg-slate-900/40",
+            class: "{theme::panel_border(profile)}",
             if highlights.has_data() {
                 div {
-                    class: "grid gap-4 border-b border-slate-800 bg-slate-900/60 px-4 py-3 text-sm text-slate-200 sm:grid-cols-3",
+                    class: "grid gap-4 {theme::table_header(profile)} px-4 py-3 text-sm sm:grid-cols-3",
                     SummaryStat {
                         title: "Best Sell (max)",
                         value: best_sell_value,
                         caption: best_sell_caption,
+                        profile: profile,
                     }
                     SummaryStat {
                         title: "Best Buy (min)",
                         value: best_buy_value,
                         caption: best_buy_caption,
+                        profile: profile,
                     }
                     div {
-                        class: "rounded-lg border border-slate-800/60 bg-slate-950/80 p-3",
-                        p { class: "text-[10px] font-semibold uppercase tracking-wide text-slate-500", "Price Ranges" }
-                        p { class: "text-xs text-slate-400", "Sell: {sell_range_summary}" }
-                        p { class: "text-xs text-slate-400", "Buy: {buy_range_summary}" }
+                        class: "{theme::panel_solid(profile)} p-3",
+                        p { class: "text-[10px] font-semibold uppercase tracking-wide {theme::text_muted(profile)}", "Price Ranges" }
+                        p { class: "text-xs {theme::text_muted(profile)}", "Sell: {sell_range_summary}" }
+                        p { class: "text-xs {theme::text_muted(profile)}", "Buy: {buy_range_summary}" }
                     }
                 }
             }
             header {
-                class: "flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-3",
-                h3 { class: "text-sm font-semibold text-slate-200", "Price Points" }
-                span { class: "text-xs text-slate-500", "{count} sources" }
+                class: "flex flex-wrap items-center justify-between gap-2 {theme::table_header(profile)} px-4 py-3",
+                h3 { class: "text-sm font-semibold {theme::text_secondary(profile)}", "Price Points" }
+                span { class: "text-xs {theme::text_muted(profile)}", "{count} sources" }
             }
             if !is_empty {
                 div {
-                    class: "flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950/40 px-4 py-2 text-xs uppercase tracking-wide text-slate-400",
+                    class: "flex flex-wrap items-center gap-2 {theme::table_header(profile)} px-4 py-2 text-xs uppercase tracking-wide",
                     span { "Sort:" }
                     button {
-                        class: sort_button_class(current_sort == SortMode::SellRange),
+                        class: sort_button_class(current_sort == SortMode::SellRange, profile),
                         onclick: {
                             let mut sort_mode = sort_mode.clone();
                             move |_| sort_mode.set(SortMode::SellRange)
@@ -114,7 +121,7 @@ pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
                         "Sell Range"
                     }
                     button {
-                        class: sort_button_class(current_sort == SortMode::BuyRange),
+                        class: sort_button_class(current_sort == SortMode::BuyRange, profile),
                         onclick: {
                             let mut sort_mode = sort_mode.clone();
                             move |_| sort_mode.set(SortMode::BuyRange)
@@ -122,7 +129,7 @@ pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
                         "Buy Range"
                     }
                     button {
-                        class: sort_button_class(current_sort == SortMode::Stock),
+                        class: sort_button_class(current_sort == SortMode::Stock, profile),
                         onclick: {
                             let mut sort_mode = sort_mode.clone();
                             move |_| sort_mode.set(SortMode::Stock)
@@ -130,7 +137,7 @@ pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
                         "Stock"
                     }
                     button {
-                        class: sort_button_class(current_sort == SortMode::Demand),
+                        class: sort_button_class(current_sort == SortMode::Demand, profile),
                         onclick: {
                             let mut sort_mode = sort_mode.clone();
                             move |_| sort_mode.set(SortMode::Demand)
@@ -140,12 +147,12 @@ pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
                 }
             }
             if is_empty {
-                p { class: "px-4 py-6 text-sm text-slate-500", "No price data available yet." }
+                p { class: "px-4 py-6 text-sm {theme::text_muted(profile)}", "No price data available yet." }
             } else {
                 table {
-                        class: "min-w-full divide-y divide-slate-800 text-sm",
+                        class: "min-w-full {theme::table_divider(profile)} text-sm",
                         thead {
-                            class: "sticky top-0 z-10 bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-500",
+                            class: "sticky top-0 z-10 {theme::table_header(profile)} text-left tracking-wide",
                             tr {
                                 th { class: "px-4 py-3 font-medium", "Terminal" }
                                 th { class: "px-4 py-3 font-medium text-right", "Sell Range (aUEC)" }
@@ -157,51 +164,67 @@ pub fn PriceTable(rows: Vec<PriceRow>) -> Element {
                             }
                         }
                     tbody {
-                        class: "divide-y divide-slate-800",
+                        class: "{theme::table_divider(profile)}",
                         for (row, is_best_sell, is_best_buy) in rendered_rows {
                             tr {
-                                class: "hover:bg-slate-800/40",
-                                td { class: "px-4 py-3 font-medium text-slate-100", "{row.location}" }
+                                class: row_hover_class(profile),
+                                td { class: "px-4 py-3 font-medium {theme::text_secondary(profile)}",
+                                    if row.is_nqa {
+                                        span {
+                                            class: "mr-1.5 inline-flex items-center rounded bg-[#3b1712] px-1.5 py-0.5 text-[10px] font-semibold {theme::text_primary(profile)}",
+                                            "🏴‍☠️"
+                                        }
+                                    }
+                                    "{row.location}"
+                                }
                                 td {
-                                    class: "px-4 py-3 text-right text-slate-300",
+                                    class: "px-4 py-3 text-right {theme::text_secondary(profile)}",
                                     div { class: "flex flex-col items-end gap-1 text-xs",
                                         span { class: "text-sm font-medium", "{format_price_range(row.sell_price_min, row.sell_price_max)}" }
                                         if is_best_sell {
                                             span {
-                                                class: "rounded-full border border-emerald-500/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200",
+                                                class: "rounded-full border border-[#5c2a1f] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide {theme::text_primary(profile)}",
                                                 "Best Sell"
                                             }
                                         }
                                     }
                                 }
                                 td {
-                                    class: "px-4 py-3 text-right text-slate-300",
+                                    class: "px-4 py-3 text-right {theme::text_secondary(profile)}",
                                     div { class: "flex flex-col items-end gap-1 text-xs",
                                         span { class: "text-sm font-medium", "{format_price_range(row.buy_price_min, row.buy_price_max)}" }
                                         if is_best_buy {
                                             span {
-                                                class: "rounded-full border border-sky-500/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-200",
+                                                class: "rounded-full border border-[#5c2a1f] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide {theme::text_primary(profile)}",
                                                 "Best Buy"
                                             }
                                         }
                                     }
                                 }
-                                td { class: "px-4 py-3 text-right text-slate-300", "{format_stock(row.stock)}" }
+                                td { class: "px-4 py-3 text-right {theme::text_secondary(profile)}", "{format_stock(row.stock)}" }
                                 td {
-                                    class: "px-4 py-3 text-right text-slate-300",
+                                    class: "px-4 py-3 text-right {theme::text_secondary(profile)}",
                                     DemandCell {
                                         sell: row.status_sell,
                                         buy: row.status_buy,
+                                        profile: profile,
                                     }
                                 }
-                                td { class: "px-4 py-3 text-right text-slate-300 whitespace-nowrap min-w-[150px]", "{format_containers(&row.container_sizes)}" }
-                                td { class: "px-4 py-3 text-slate-400", "{row.updated_label}" }
+                                td { class: "px-4 py-3 text-right {theme::text_secondary(profile)} whitespace-nowrap min-w-[150px]", "{format_containers(&row.container_sizes)}" }
+                                td { class: "px-4 py-3 {theme::text_muted(profile)}", "{row.updated_label}" }
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+fn row_hover_class(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Pirate => "hover:bg-[#3b1712]/30",
+        _ => "hover:bg-slate-800/40",
     }
 }
 
@@ -337,6 +360,7 @@ fn format_summary_range(range: Option<(f64, f64)>) -> String {
 struct DemandCellProps {
     sell: Option<i32>,
     buy: Option<i32>,
+    profile: Profile,
 }
 
 #[component]
@@ -345,8 +369,8 @@ fn DemandCell(props: DemandCellProps) -> Element {
     let buy = status_label(props.buy).unwrap_or("—");
     rsx! {
         div { class: "flex flex-col items-end gap-0.5 text-xs",
-            span { class: "text-slate-400", "Sell: {sell}" }
-            span { class: "text-slate-400", "Buy: {buy}" }
+            span { class: "{theme::text_muted(props.profile)}", "Sell: {sell}" }
+            span { class: "{theme::text_muted(props.profile)}", "Buy: {buy}" }
         }
     }
 }
@@ -379,16 +403,17 @@ struct SummaryStatProps {
     title: String,
     value: String,
     caption: String,
+    profile: Profile,
 }
 
 #[component]
 fn SummaryStat(props: SummaryStatProps) -> Element {
     rsx! {
         div {
-            class: "rounded-lg border border-slate-800/60 bg-slate-950/80 p-3",
-            p { class: "text-[10px] font-semibold uppercase tracking-wide text-slate-500", "{props.title}" }
-            p { class: "text-lg font-semibold text-slate-100", "{props.value}" }
-            p { class: "text-xs text-slate-500", "{props.caption}" }
+            class: "{theme::panel_solid(props.profile)} p-3",
+            p { class: "text-[10px] font-semibold uppercase tracking-wide {theme::text_muted(props.profile)}", "{props.title}" }
+            p { class: "text-lg font-semibold {theme::text_secondary(props.profile)}", "{props.value}" }
+            p { class: "text-xs {theme::text_muted(props.profile)}", "{props.caption}" }
         }
     }
 }
@@ -401,11 +426,11 @@ enum SortMode {
     Demand,
 }
 
-fn sort_button_class(active: bool) -> &'static str {
+fn sort_button_class(active: bool, profile: Profile) -> &'static str {
     if active {
-        "rounded-md border border-indigo-500/60 bg-indigo-500/15 px-2 py-1 text-[11px] font-semibold text-indigo-100"
+        theme::btn_small_active(profile)
     } else {
-        "rounded-md border border-slate-800 px-2 py-1 text-[11px] text-slate-400 transition hover:border-slate-600 hover:text-slate-200"
+        theme::btn_small_inactive(profile)
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
     infra::uex::{CacheStatus, UexClient},
     ui::{
         components::toast::{push_toast, Toast, ToastKind, ToastMessage},
-        pages::{BestPricePage, CargoPage, SettingsPage},
+        pages::{BestPricePage, CargoPage, PlannerPage, RoutesPage, SettingsPage},
         shell::Shell,
     },
     util::{
@@ -24,8 +24,12 @@ pub enum Route {
     #[route("/")]
     #[route("/cargo")]
     Cargo {},
+    #[route("/planner")]
+    Planner {},
     #[route("/best-price")]
     BestPrice {},
+    #[route("/routes")]
+    Routes {},
     #[route("/settings")]
     Settings {},
 }
@@ -56,11 +60,25 @@ pub fn App() -> Element {
         move || async move { fetch_commodities(state.clone(), toasts.clone()).await }
     });
 
+    // Load terminal data for NQA filtering (cached with game version tracking)
+    let _terminals = use_resource({
+        let state = state.clone();
+        let toasts = toasts.clone();
+        move || async move { fetch_terminals(state.clone(), toasts.clone()).await }
+    });
+
     let _prices = use_resource({
         let state = state.clone();
         let toasts = toasts.clone();
         let price_request = price_request.clone();
         move || async move { fetch_prices(state.clone(), toasts.clone(), price_request.clone()).await }
+    });
+
+    // Auto-fetch prices for persisted cargo items on startup
+    let _startup_prices = use_resource({
+        let state = state.clone();
+        let toasts = toasts.clone();
+        move || async move { fetch_prices_for_cargo(state.clone(), toasts.clone()).await }
     });
 
     rsx! {
@@ -76,6 +94,115 @@ pub fn persist_user_state(state: &Signal<AppState>) {
     let snapshot = state.with(|st| st.to_persisted());
     if let Err(err) = save_persisted_state(&snapshot) {
         println!("Failed to persist user state: {err}");
+    }
+}
+
+async fn fetch_terminals(
+    mut state: Signal<AppState>,
+    toasts: Signal<Vec<ToastMessage>>,
+) {
+    let Ok(client) = UexClient::new() else {
+        push_toast(
+            toasts.clone(),
+            ToastKind::Warning,
+            "Failed to initialise UEX client for terminals.",
+        );
+        return;
+    };
+
+    match client.get_terminals().await {
+        Ok(cache) => {
+            let nqa_count = cache.nqa_terminal_ids().len();
+            let total_count = cache.terminals.len();
+            println!(
+                "[app] Loaded {} terminals ({} NQA) for game version {}",
+                total_count, nqa_count, cache.game_version
+            );
+            state.with_mut(|st| {
+                st.nqa_terminal_ids = cache.nqa_terminal_ids();
+            });
+            if nqa_count == 0 {
+                push_toast(
+                    toasts.clone(),
+                    ToastKind::Warning,
+                    "No NQA terminals found in API data. Hot cargo filtering may not work.",
+                );
+            }
+        }
+        Err(err) => {
+            println!("[app] Failed to load terminals: {err}");
+            push_toast(
+                toasts.clone(),
+                ToastKind::Warning,
+                format!("Failed to load terminal data: {err}. Hot cargo filtering disabled."),
+            );
+        }
+    }
+}
+
+/// Fetch prices for all cargo items on startup.
+async fn fetch_prices_for_cargo(
+    mut state: Signal<AppState>,
+    toasts: Signal<Vec<ToastMessage>>,
+) {
+    // Get unique commodity IDs from cargo
+    let commodity_ids: Vec<(String, Option<String>)> = state.with(|st| {
+        st.cargo_items
+            .iter()
+            .map(|item| (item.commodity_id.clone(), Some(item.commodity_name.clone())))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    });
+
+    if commodity_ids.is_empty() {
+        return;
+    }
+
+    println!("[startup] Loading prices for {} cargo commodities...", commodity_ids.len());
+
+    let Ok(client) = UexClient::new() else {
+        return;
+    };
+
+    let mut loaded = 0;
+    for (commodity_id, commodity_name) in commodity_ids {
+        // Skip if already have fresh prices
+        let needs_fetch = state.with(|st| {
+            st.price_points
+                .get(&commodity_id)
+                .map(|p| p.is_empty())
+                .unwrap_or(true)
+        });
+
+        if !needs_fetch {
+            continue;
+        }
+
+        match client.get_prices(&commodity_id, commodity_name.as_deref()).await {
+            Ok(payload) => {
+                state.with_mut(|st| {
+                    st.price_points.insert(commodity_id.clone(), payload.data.clone());
+                    st.cache.record_fetch(
+                        CacheResource::Prices(commodity_id.clone()),
+                        payload.fetched_at,
+                    );
+                });
+                loaded += 1;
+            }
+            Err(err) => {
+                println!("[startup] Failed to load prices for {commodity_id}: {err}");
+            }
+        }
+    }
+
+    if loaded > 0 {
+        println!("[startup] Loaded prices for {loaded} commodities");
+        push_toast(
+            toasts.clone(),
+            ToastKind::Info,
+            format!("Loaded prices for {loaded} saved cargo item(s)."),
+        );
     }
 }
 
@@ -229,6 +356,11 @@ pub fn Cargo() -> Element {
 }
 
 #[component]
+pub fn Planner() -> Element {
+    rsx! { Shell { PlannerPage {} } }
+}
+
+#[component]
 pub fn BestPrice() -> Element {
     rsx! { Shell { BestPricePage {} } }
 }
@@ -236,4 +368,9 @@ pub fn BestPrice() -> Element {
 #[component]
 pub fn Settings() -> Element {
     rsx! { Shell { SettingsPage {} } }
+}
+
+#[component]
+pub fn Routes() -> Element {
+    rsx! { Shell { RoutesPage {} } }
 }

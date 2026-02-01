@@ -18,7 +18,8 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
-use crate::domain::{Commodity, CommodityId, PricePoint};
+use crate::domain::{Commodity, CommodityId, PricePoint, Terminal};
+use crate::infra::cache::{load_terminal_cache, save_terminal_cache, TerminalCache};
 
 const DEFAULT_BASE_URL: &str = "https://api.uexcorp.uk/2.0/";
 const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60);
@@ -62,6 +63,7 @@ impl<T> CachedPayload<T> {
 struct UexCache {
     commodities: Option<Cached<Vec<Commodity>>>,
     prices: HashMap<CommodityId, Cached<Vec<PricePoint>>>,
+    terminals: Option<TerminalCache>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +80,7 @@ impl UexCache {
     fn clear(&mut self) {
         self.commodities = None;
         self.prices.clear();
+        // Note: terminals are NOT cleared here - they persist across cache clears
     }
 }
 
@@ -199,6 +202,155 @@ impl UexClient {
 
     pub async fn clear_cache(&self) {
         self.cache.lock().await.clear();
+    }
+
+    /// Load terminals with TTL + version check.
+    /// Refreshes if: cache expired (>7 days) OR game version changed.
+    pub async fn get_terminals(&self) -> Result<TerminalCache, UexClientError> {
+        // Check in-memory cache first (always valid within session)
+        {
+            let cache = self.cache.lock().await;
+            if let Some(ref terminals) = cache.terminals {
+                println!(
+                    "[terminals] Using in-memory cache ({} terminals, version {}, age: {})",
+                    terminals.terminals.len(),
+                    terminals.game_version,
+                    terminals.age_string()
+                );
+                return Ok(terminals.clone());
+            }
+        }
+
+        // Try loading from disk cache
+        if let Some(disk_cache) = load_terminal_cache() {
+            let age = disk_cache.age_string();
+            
+            // Check TTL first
+            if disk_cache.is_expired() {
+                println!(
+                    "[terminals] Cache expired (age: {}, TTL: 7d), refreshing...",
+                    age
+                );
+                return self.refresh_terminals().await;
+            }
+
+            // TTL ok - check version as secondary validation
+            let current_version = self.fetch_current_game_version().await?;
+            
+            if disk_cache.game_version == current_version {
+                println!(
+                    "[terminals] Disk cache valid (age: {}, version: {})",
+                    age, current_version
+                );
+                // Store in memory cache
+                self.cache.lock().await.terminals = Some(disk_cache.clone());
+                return Ok(disk_cache);
+            } else {
+                println!(
+                    "[terminals] Version changed: {} -> {}, refreshing...",
+                    disk_cache.game_version, current_version
+                );
+            }
+        }
+
+        // Fetch fresh from API
+        self.refresh_terminals().await
+    }
+
+    /// Force refresh terminals from API.
+    pub async fn refresh_terminals(&self) -> Result<TerminalCache, UexClientError> {
+        println!("[terminals] Fetching all terminals from API...");
+        
+        // Get current game version first
+        let game_version = self.fetch_current_game_version().await?;
+        
+        let url = self.url("terminals")?;
+        let terminals_dto: Vec<TerminalDto> = self.fetch_data(self.http.get(url)).await?;
+
+        let terminals: Vec<Terminal> = terminals_dto.into_iter().map(Terminal::from).collect();
+        let nqa_count = terminals.iter().filter(|t| t.is_nqa).count();
+
+        println!(
+            "[terminals] Loaded {} terminals ({} NQA) for version {}",
+            terminals.len(),
+            nqa_count,
+            game_version
+        );
+
+        let cache = TerminalCache::new(game_version, terminals);
+
+        // Save to disk
+        if let Err(e) = save_terminal_cache(&cache) {
+            println!("[terminals] Warning: failed to save cache: {e}");
+        }
+
+        // Store in memory
+        self.cache.lock().await.terminals = Some(cache.clone());
+
+        Ok(cache)
+    }
+
+    /// Check if a terminal ID is NQA (no questions asked).
+    /// Loads terminal cache if not already loaded.
+    pub async fn is_terminal_nqa(&self, terminal_id: i32) -> Result<bool, UexClientError> {
+        let cache = self.get_terminals().await?;
+        Ok(cache.is_nqa(terminal_id))
+    }
+
+    /// Get all NQA terminal IDs as a set.
+    pub async fn get_nqa_terminal_ids(&self) -> Result<std::collections::HashSet<i32>, UexClientError> {
+        let cache = self.get_terminals().await?;
+        Ok(cache.nqa_terminal_ids())
+    }
+
+    /// Get distance between two terminals in Gigameters.
+    pub async fn get_terminal_distance(
+        &self,
+        origin_id: i32,
+        destination_id: i32,
+    ) -> Result<Option<f64>, UexClientError> {
+        let mut url = self.url("terminals_distances")?;
+        url.query_pairs_mut()
+            .append_pair("id_terminal_origin", &origin_id.to_string())
+            .append_pair("id_terminal_destination", &destination_id.to_string());
+
+        match self.fetch_data::<TerminalDistanceDto>(self.http.get(url)).await {
+            Ok(dto) => {
+                let distance = dto.distance
+                    .and_then(|d| d.parse::<f64>().ok());
+                Ok(distance)
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Get distances from one origin to multiple destinations.
+    /// Returns a map of destination_id -> distance in Gm.
+    pub async fn get_terminal_distances(
+        &self,
+        origin_id: i32,
+        destination_ids: &[i32],
+    ) -> Result<std::collections::HashMap<i32, f64>, UexClientError> {
+        let mut distances = std::collections::HashMap::new();
+        
+        for &dest_id in destination_ids {
+            if dest_id == origin_id {
+                distances.insert(dest_id, 0.0);
+                continue;
+            }
+            if let Ok(Some(dist)) = self.get_terminal_distance(origin_id, dest_id).await {
+                distances.insert(dest_id, dist);
+            }
+        }
+        
+        Ok(distances)
+    }
+
+    /// Fetch current game version from API.
+    async fn fetch_current_game_version(&self) -> Result<String, UexClientError> {
+        let url = self.url("game_versions")?;
+        let versions: GameVersionsDto = self.fetch_data(self.http.get(url)).await?;
+        Ok(versions.live.unwrap_or_else(|| "unknown".to_string()))
     }
 
     async fn cached_commodities(&self) -> Option<CachedPayload<Vec<Commodity>>> {
@@ -346,6 +498,62 @@ impl From<CommodityDto> for Commodity {
 }
 
 #[derive(Debug, Deserialize)]
+struct TerminalDto {
+    id: i32,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    is_nqa: Option<i32>,
+    #[serde(default)]
+    star_system_name: Option<String>,
+    #[serde(default)]
+    game_version: Option<String>,
+    #[serde(default)]
+    space_station_name: Option<String>,
+    #[serde(default)]
+    city_name: Option<String>,
+    #[serde(default)]
+    outpost_name: Option<String>,
+    #[serde(default)]
+    planet_name: Option<String>,
+    #[serde(default)]
+    orbit_name: Option<String>,
+}
+
+impl From<TerminalDto> for Terminal {
+    fn from(dto: TerminalDto) -> Self {
+        Self {
+            id: dto.id,
+            name: dto.name.unwrap_or_else(|| "Unknown".to_string()),
+            code: dto.code,
+            is_nqa: dto.is_nqa.unwrap_or(0) == 1,
+            system: dto.star_system_name,
+            space_station_name: dto.space_station_name,
+            city_name: dto.city_name,
+            outpost_name: dto.outpost_name,
+            planet_name: dto.planet_name,
+            orbit_name: dto.orbit_name,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GameVersionsDto {
+    #[serde(default)]
+    live: Option<String>,
+    #[serde(default)]
+    ptu: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TerminalDistanceDto {
+    #[serde(default)]
+    distance: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct CommodityPriceDto {
     #[serde(default)]
     id_terminal: Option<i32>,
@@ -372,6 +580,8 @@ struct CommodityPriceDto {
     #[serde(default)]
     container_sizes: Option<String>,
     #[serde(default)]
+    scu_buy: Option<f64>,
+    #[serde(default)]
     scu_sell_stock: Option<f64>,
     #[serde(default)]
     status_sell: Option<i32>,
@@ -379,6 +589,17 @@ struct CommodityPriceDto {
     status_buy: Option<i32>,
     #[serde(default)]
     volatility_price_sell: Option<f64>,
+    #[serde(default)]
+    price_buy_users_rows: Option<i32>,
+    #[serde(default)]
+    price_sell_users_rows: Option<i32>,
+    // Location type fields
+    #[serde(default)]
+    city_name: Option<String>,
+    #[serde(default)]
+    outpost_name: Option<String>,
+    #[serde(default)]
+    space_station_name: Option<String>,
     #[serde(default, alias = "date_modified", alias = "dateModified")]
     date_modified: Option<i64>,
     #[serde(default, alias = "updated_at", alias = "updatedAt")]
@@ -407,10 +628,16 @@ impl From<CommodityPriceDto> for PricePoint {
             price_buy_min: dto.price_buy_min,
             price_average: dto.price_sell_average,
             container_sizes: parse_container_sizes(dto.container_sizes.as_deref()),
+            scu_buy: dto.scu_buy,
             scu_sell_stock: dto.scu_sell_stock,
             status_sell: dto.status_sell,
             status_buy: dto.status_buy,
             volatility_sell: dto.volatility_price_sell,
+            buy_user_rows: dto.price_buy_users_rows,
+            sell_user_rows: dto.price_sell_users_rows,
+            city_name: dto.city_name,
+            outpost_name: dto.outpost_name,
+            space_station_name: dto.space_station_name,
             updated_at: parse_timestamp_fields(dto.date_modified, dto.updated_at),
         }
     }

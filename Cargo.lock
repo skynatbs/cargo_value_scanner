@@ -303,6 +303,7 @@ dependencies = [
  "dioxus",
  "dioxus-desktop",
  "directories",
+ "dirs",
  "reqwest",
  "rust-embed",
  "semver",

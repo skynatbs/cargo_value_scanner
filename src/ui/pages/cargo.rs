@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 
+use std::collections::HashSet;
+
 use crate::{
     app::{persist_user_state, CACHE_TTL},
     domain::{
-        evaluate_cargo_items, profitability_indicator, AppState, CacheResource, CargoItem,
-        Commodity, PricePoint,
+        evaluate_cargo_items, profitability_indicator, AppState,
+        CacheResource, CargoItem, Commodity, PricePoint,
     },
     ui::components::{
         cargo_table::{CargoRow, CargoTable},
@@ -15,6 +17,7 @@ use crate::{
         profit_indicator::ProfitIndicator,
         toast::{push_toast, ToastKind, ToastMessage},
     },
+    ui::theme,
     util::generate_id,
 };
 
@@ -23,6 +26,8 @@ pub fn CargoPage() -> Element {
     let state = use_context::<Signal<AppState>>();
     let toasts = use_context::<Signal<Vec<ToastMessage>>>();
     let price_request = use_context::<Signal<Option<String>>>();
+    
+    let profile = state.with(|s| s.profile);
 
     let mut commodity_query = use_signal(String::new);
     let mut scu_input = use_signal(String::new);
@@ -32,6 +37,7 @@ pub fn CargoPage() -> Element {
     let items = state.with(|st| st.cargo_items.clone());
     let price_map = state.with(|st| st.price_points.clone());
     let profitability = state.with(|st| st.profitability.clone());
+    let nqa_terminal_ids = state.with(|st| st.nqa_terminal_ids.clone());
 
     let summary = evaluate_cargo_items(&items, &price_map);
     let indicator = profitability_indicator(summary.total_ev, &profitability);
@@ -48,12 +54,9 @@ pub fn CargoPage() -> Element {
             let evaluation = evaluation_lookup.get(&item.id);
             let best_sell = price_map
                 .get(&item.commodity_id)
-                .and_then(|points| best_sell_info(points));
+                .and_then(|points| best_sell_info(points, item.is_hot, &nqa_terminal_ids));
             let (best_sell_location, best_sell_price) = match best_sell {
-                Some(info) => (
-                    Some(format!("{} ({:.0} aUEC)", info.location, info.price)),
-                    Some(info.price),
-                ),
+                Some(info) => (Some(info.location), Some(info.price)),
                 None => (None, None),
             };
             let expected_value = best_sell_price
@@ -69,6 +72,7 @@ pub fn CargoPage() -> Element {
                 max_value: evaluation.and_then(|eval| eval.max),
                 confidence: evaluation.map(|eval| eval.confidence).unwrap_or_default(),
                 best_sell_location,
+                is_hot: item.is_hot,
             }
         })
         .collect();
@@ -78,33 +82,52 @@ pub fn CargoPage() -> Element {
 
     let selected_id = selected_item();
     let price_breakdown = selected_id.as_ref().and_then(|id| {
-        let commodity_id = items
-            .iter()
-            .find(|item| &item.id == id)
-            .map(|item| item.commodity_id.clone())?;
+        let selected_cargo = items.iter().find(|item| &item.id == id)?;
+        let commodity_id = selected_cargo.commodity_id.clone();
+        let is_hot = selected_cargo.is_hot;
         let data = price_map.get(&commodity_id)?.clone();
-        let rows = data
+        
+        // Filter to "no questions asked" terminals if cargo is hot
+        let filtered_data: Vec<_> = if is_hot {
+            data.into_iter()
+                .filter(|point| {
+                    point.terminal_id
+                        .map(|id| nqa_terminal_ids.contains(&id))
+                        .unwrap_or(false)
+                })
+                .collect()
+        } else {
+            data
+        };
+        
+        let rows = filtered_data
             .into_iter()
-            .map(|point| PriceRow {
-                location: point.terminal_name,
-                sell_price_min: point
-                    .price_sell_min
-                    .or(point.price_sell)
-                    .or(point.price_average),
-                sell_price_max: point
-                    .price_sell_max
-                    .or(point.price_sell)
-                    .or(point.price_average),
-                buy_price_min: point.price_buy_min.or(point.price_buy),
-                buy_price_max: point.price_buy_max.or(point.price_buy),
-                stock: point.scu_sell_stock,
-                status_sell: point.status_sell,
-                status_buy: point.status_buy,
-                container_sizes: point.container_sizes.clone(),
-                updated_label: humanize_age(point.updated_at),
+            .map(|point| {
+                let is_nqa = point.terminal_id
+                    .map(|id| nqa_terminal_ids.contains(&id))
+                    .unwrap_or(false);
+                PriceRow {
+                    location: point.terminal_name,
+                    sell_price_min: point
+                        .price_sell_min
+                        .or(point.price_sell)
+                        .or(point.price_average),
+                    sell_price_max: point
+                        .price_sell_max
+                        .or(point.price_sell)
+                        .or(point.price_average),
+                    buy_price_min: point.price_buy_min.or(point.price_buy),
+                    buy_price_max: point.price_buy_max.or(point.price_buy),
+                    stock: point.scu_sell_stock,
+                    status_sell: point.status_sell,
+                    status_buy: point.status_buy,
+                    container_sizes: point.container_sizes.clone(),
+                    updated_label: humanize_age(point.updated_at),
+                    is_nqa,
+                }
             })
             .collect::<Vec<_>>();
-        Some((rows, commodity_id))
+        Some((rows, commodity_id, is_hot))
     });
 
     let on_submit = {
@@ -204,6 +227,18 @@ pub fn CargoPage() -> Element {
         }
     };
 
+    let on_toggle_hot = {
+        let mut state = state.clone();
+        move |id: String| {
+            state.with_mut(|st| {
+                if let Some(item) = st.cargo_items.iter_mut().find(|item| item.id == id) {
+                    item.is_hot = !item.is_hot;
+                }
+            });
+            persist_user_state(&state);
+        }
+    };
+
     let on_refresh_prices = {
         let state = state.clone();
         let price_request = price_request.clone();
@@ -230,9 +265,9 @@ pub fn CargoPage() -> Element {
         }
     };
 
-    let (price_rows, selected_commodity_id) = match price_breakdown {
-        Some((rows, id)) => (rows, Some(id)),
-        None => (Vec::new(), None),
+    let (price_rows, selected_commodity_id, selected_is_hot) = match price_breakdown {
+        Some((rows, id, is_hot)) => (rows, Some(id), is_hot),
+        None => (Vec::new(), None, false),
     };
 
     rsx! {
@@ -243,13 +278,15 @@ pub fn CargoPage() -> Element {
                     title: "Total Expected Value".to_string(),
                     value: total_ev_display,
                     description: Some("Sum of all cargo EV (aUEC)".to_string()),
+                    profile: profile,
                 }
                 KpiCard {
                     title: "Average Confidence".to_string(),
                     value: format!("{:.0}%", average_confidence * 100.0),
                     description: Some("Weighted by evaluated items".to_string()),
+                    profile: profile,
                 }
-                ProfitIndicator { indicator: indicator }
+                ProfitIndicator { indicator: indicator, profile: profile }
             }
 
             section {
@@ -257,12 +294,12 @@ pub fn CargoPage() -> Element {
                 div {
                     class: "space-y-4",
                     form {
-                        class: "flex flex-wrap items-end gap-4 rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-4",
+                        class: "{theme::panel_border(profile)} flex flex-wrap items-end gap-4 px-4 py-4",
                         onsubmit: on_submit,
                         div { class: "flex-1 min-w-[200px]",
-                            label { class: "block text-xs font-semibold uppercase text-slate-500", "Commodity" }
+                            label { class: "{theme::label_class(profile)}", "Commodity" }
                             input {
-                                class: "mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none",
+                                class: "mt-1 w-full {theme::input_small(profile)}",
                                 value: commodity_query(),
                                 oninput: move |evt| commodity_query.set(evt.value().to_string()),
                                 list: "commodity-list",
@@ -276,9 +313,9 @@ pub fn CargoPage() -> Element {
                             }
                         }
                         div { class: "w-32",
-                            label { class: "block text-xs font-semibold uppercase text-slate-500", "SCU" }
+                            label { class: "{theme::label_class(profile)}", "SCU" }
                             input {
-                                class: "mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none",
+                                class: "mt-1 w-full {theme::input_small(profile)}",
                                 inputmode: "decimal",
                                 value: scu_input(),
                                 oninput: move |evt| scu_input.set(evt.value().to_string()),
@@ -286,7 +323,7 @@ pub fn CargoPage() -> Element {
                             }
                         }
                         button {
-                            class: "rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400",
+                            class: "{theme::btn_primary(profile)}",
                             r#type: "submit",
                             "Add Cargo"
                         }
@@ -295,25 +332,34 @@ pub fn CargoPage() -> Element {
                     CargoTable {
                         rows,
                         selected_id: selected_id.clone(),
+                        profile: profile,
                         on_select,
                         on_remove,
+                        on_toggle_hot,
                     }
                 }
 
                 div {
                     class: "space-y-4",
                     div { class: "flex items-center justify-between",
-                        h2 { class: "text-sm font-semibold text-slate-200", "Price Breakdown" }
+                        h2 { class: "text-sm font-semibold {theme::text_secondary(profile)}", "Price Breakdown" }
                         button {
-                            class: "text-xs font-semibold uppercase tracking-wide text-indigo-300 hover:text-indigo-100",
+                            class: "{theme::link_class(profile)}",
                             onclick: on_refresh_prices,
                             "Refresh"
                         }
                     }
                     if let Some(ref commodity_id) = selected_commodity_id {
-                        p { class: "text-xs text-slate-500", "Commodity ID: {commodity_id}" }
+                        p { class: "text-xs {theme::text_muted(profile)}", "Commodity ID: {commodity_id}" }
                     }
-                    PriceTable { rows: price_rows }
+                    if selected_is_hot {
+                        p { 
+                            class: "text-xs text-orange-400 flex items-center gap-1",
+                            span { "🔥" }
+                            "Showing only no-questions-asked terminals (hot cargo)"
+                        }
+                    }
+                    PriceTable { rows: price_rows, profile: profile }
                 }
             }
         }
@@ -366,9 +412,18 @@ struct BestSellInfo {
     price: f64,
 }
 
-fn best_sell_info(points: &[PricePoint]) -> Option<BestSellInfo> {
+fn best_sell_info(points: &[PricePoint], is_hot: bool, nqa_terminal_ids: &HashSet<i32>) -> Option<BestSellInfo> {
     points
         .iter()
+        .filter(|point| {
+            // If cargo is hot, only consider "no questions asked" terminals
+            if !is_hot {
+                return true;
+            }
+            point.terminal_id
+                .map(|id| nqa_terminal_ids.contains(&id))
+                .unwrap_or(false)
+        })
         .filter_map(|point| {
             let price = point
                 .price_sell_max
@@ -451,6 +506,7 @@ fn adjust_cargo_item(
                 commodity_id: commodity.id.clone(),
                 commodity_name: commodity.name.clone(),
                 scu: delta as u32,
+                is_hot: false,
             };
             st.cargo_items.push(new_item);
             result = CargoAdjustResult::Added(item_id.clone(), commodity.id.clone());

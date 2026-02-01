@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{Duration, SystemTime},
 };
 
@@ -10,14 +10,53 @@ use super::entities::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Player profile / playstyle for the current session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Profile {
+    #[default]
+    None,
+    Pirate,
+    Trader,
+    Miner,
+}
+
+impl Profile {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Profile::None => "None",
+            Profile::Pirate => "Pirat",
+            Profile::Trader => "Händler", 
+            Profile::Miner => "Miner",
+        }
+    }
+    
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            Profile::None => "❓",
+            Profile::Pirate => "🏴‍☠️",
+            Profile::Trader => "📦",
+            Profile::Miner => "⛏️",
+        }
+    }
+    
+    pub fn is_selected(&self) -> bool {
+        !matches!(self, Profile::None)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AppState {
+    /// Currently selected player profile.
+    pub profile: Profile,
     pub cargo_items: Vec<CargoItem>,
     pub commodities: Vec<Commodity>,
     pub price_points: HashMap<CommodityId, Vec<PricePoint>>,
     pub sell_locations: HashMap<String, SellLocation>,
     pub profitability: ProfitabilityParams,
     pub cache: CacheTimestamps,
+    /// Terminal IDs that are "no questions asked" (accept hot cargo).
+    /// Loaded from API and cached locally with game version tracking.
+    pub nqa_terminal_ids: HashSet<i32>,
 }
 
 impl AppState {
@@ -26,12 +65,14 @@ impl AppState {
     }
 
     pub fn apply_persisted(&mut self, persisted: PersistedState) {
+        self.profile = persisted.profile;
         self.cargo_items = persisted.cargo_items;
         self.profitability = persisted.profitability;
     }
 
     pub fn to_persisted(&self) -> PersistedState {
         PersistedState {
+            profile: self.profile,
             cargo_items: self.cargo_items.clone(),
             profitability: self.profitability.clone(),
         }
@@ -76,6 +117,8 @@ pub enum CacheResource {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PersistedState {
+    #[serde(default)]
+    pub profile: Profile,
     pub cargo_items: Vec<CargoItem>,
     pub profitability: ProfitabilityParams,
 }

@@ -9,7 +9,10 @@ mod util;
 use dioxus::prelude::*;
 
 #[cfg(feature = "desktop")]
-use dioxus_desktop::{tao::window::WindowBuilder, Config as DesktopConfig};
+use dioxus_desktop::{
+    tao::{dpi::LogicalSize, window::WindowBuilder},
+    Config as DesktopConfig,
+};
 
 use crate::util::version::APP_NAME;
 
@@ -34,6 +37,7 @@ fn main() {
             DesktopConfig::new().with_window(
                 WindowBuilder::new()
                     .with_title(APP_NAME)
+                    .with_inner_size(LogicalSize::new(1280.0, 800.0))
             )
         };
         builder.with_cfg(config)
